@@ -230,6 +230,10 @@ public class SrsCameraView extends GLSurfaceView implements GLSurfaceView.Render
         return mCamId;
     }
 
+    public Camera getCamera() {
+        return mCamera;
+    }
+
     public void enableEncoding() {
         worker = new Thread(new Runnable() {
             @Override
