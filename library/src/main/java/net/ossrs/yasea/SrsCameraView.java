@@ -220,7 +220,9 @@ public class SrsCameraView extends GLSurfaceView implements GLSurfaceView.Render
             }
         }
         if (mCamera != null) {
+            mCamera.stopPreview();
             mCamera.setDisplayOrientation(mPreviewRotation);
+            mCamera.startPreview();
         }
     }
 
