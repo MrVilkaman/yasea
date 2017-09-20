@@ -10,6 +10,10 @@ import android.opengl.GLSurfaceView;
 import android.opengl.Matrix;
 import android.util.AttributeSet;
 
+import com.seu.magicfilter.base.gpuimage.GPUImageFilter;
+import com.seu.magicfilter.utils.MagicFilterFactory;
+import com.seu.magicfilter.utils.MagicFilterType;
+import com.seu.magicfilter.utils.OpenGLUtils;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -25,7 +29,9 @@ import javax.microedition.khronos.opengles.GL10;
  */
 public class SrsCameraView extends GLSurfaceView implements GLSurfaceView.Renderer {
 
+    private GPUImageFilter magicFilter;
     private SurfaceTexture surfaceTexture;
+    private int mOESTextureId = OpenGLUtils.NO_TEXTURE;
     private int mSurfaceWidth;
     private int mSurfaceHeight;
     private int mPreviewWidth;
@@ -66,7 +72,12 @@ public class SrsCameraView extends GLSurfaceView implements GLSurfaceView.Render
         GLES20.glDisable(GL10.GL_DITHER);
         GLES20.glClearColor(0, 0, 0, 0);
 
-        surfaceTexture = new SurfaceTexture(-1);
+        magicFilter = new GPUImageFilter(MagicFilterType.NONE);
+        magicFilter.init(getContext().getApplicationContext());
+        magicFilter.onInputSizeChanged(mPreviewWidth, mPreviewHeight);
+
+        mOESTextureId = OpenGLUtils.getExternalOESTextureID();
+        surfaceTexture = new SurfaceTexture(mOESTextureId);
         surfaceTexture.setOnFrameAvailableListener(new SurfaceTexture.OnFrameAvailableListener() {
             @Override
             public void onFrameAvailable(SurfaceTexture surfaceTexture) {
@@ -89,6 +100,7 @@ public class SrsCameraView extends GLSurfaceView implements GLSurfaceView.Render
         GLES20.glViewport(0, 0, width, height);
         mSurfaceWidth = width;
         mSurfaceHeight = height;
+        magicFilter.onDisplaySizeChanged(width, height);
 
         mOutputAspectRatio = width > height ? (float) width / height : (float) height / width;
         float aspectRatio = mOutputAspectRatio / mInputAspectRatio;
@@ -108,8 +120,15 @@ public class SrsCameraView extends GLSurfaceView implements GLSurfaceView.Render
 
         surfaceTexture.getTransformMatrix(mSurfaceMatrix);
         Matrix.multiplyMM(mTransformMatrix, 0, mSurfaceMatrix, 0, mProjectionMatrix, 0);
+        magicFilter.setTextureTransformMatrix(mTransformMatrix);
+        magicFilter.onDrawFrame(mOESTextureId);
 
-
+        if (mIsEncoding) {
+            mGLIntBufferCache.add(magicFilter.getGLFboBuffer());
+            synchronized (writeLock) {
+                writeLock.notifyAll();
+            }
+        }
     }
 
     public void setPreviewCallback(PreviewCallback cb) {
@@ -136,6 +155,40 @@ public class SrsCameraView extends GLSurfaceView implements GLSurfaceView.Render
         return new int[] { mPreviewWidth, mPreviewHeight };
     }
 
+    public boolean setFilter(final MagicFilterType type) {
+        if (mCamera == null) {
+            return false;
+        }
+
+        queueEvent(new Runnable() {
+            @Override
+            public void run() {
+                if (magicFilter != null) {
+                    magicFilter.destroy();
+                }
+                magicFilter = MagicFilterFactory.initFilters(type);
+                if (magicFilter != null) {
+                    magicFilter.init(getContext().getApplicationContext());
+                    magicFilter.onInputSizeChanged(mPreviewWidth, mPreviewHeight);
+                    magicFilter.onDisplaySizeChanged(mSurfaceWidth, mSurfaceHeight);
+                }
+            }
+        });
+        requestRender();
+        return true;
+    }
+
+    private void deleteTextures() {
+        if (mOESTextureId != OpenGLUtils.NO_TEXTURE) {
+            queueEvent(new Runnable() {
+                @Override
+                public void run() {
+                    GLES20.glDeleteTextures(1, new int[]{ mOESTextureId }, 0);
+                    mOESTextureId = OpenGLUtils.NO_TEXTURE;
+                }
+            });
+        }
+    }
 
     public void setCameraId(int id) {
         stopTorch();
